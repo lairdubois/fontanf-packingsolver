@@ -10,6 +10,7 @@ namespace irregular
 using LengthDbl = double;
 using AreaDbl = double;
 using ElementPos = int64_t;
+using ShapePos = int64_t;
 
 /**
  * Structure for a point.
@@ -159,6 +160,8 @@ struct Shape
 
     Shape identity_line_axial_symmetry() const;
 
+    Shape reverse() const;
+
     std::string to_string(Counter indentation) const;
 };
 
@@ -200,9 +203,6 @@ struct Parameters
  */
 struct Defect
 {
-    /** Id of the defect. */
-    DefectId id;
-
     /** Shape. */
     Shape shape;
 
@@ -220,9 +220,6 @@ struct Defect
  */
 struct BinType
 {
-    /** Id of the bin type. */
-    BinTypeId id;
-
     /** Cost of the bin type. */
     Profit cost;
 
@@ -269,9 +266,6 @@ struct BinType
  */
 struct ItemType
 {
-    /** Id of the item type. */
-    ItemTypeId id;
-
     /** Profit of the item type. */
     Profit profit;
 
@@ -343,7 +337,7 @@ public:
      * Return 'true' iff quality_rule 'quality_rule' can contain a defect of
      * type 'type'.
      */
-    inline bool can_contain(QualityRule quality_rule, DefectTypeId type) const;
+    bool can_contain(QualityRule quality_rule, DefectTypeId type) const;
 
     /*
      * Getters: bin types
