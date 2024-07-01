@@ -241,6 +241,104 @@ Shape read_shape(basic_json& json_item)
 }
 
 void InstanceBuilder::read(
+        std::istream& instance_stream)
+{
+
+    nlohmann ::json j;
+    instance_stream >> j;
+
+    if (j.contains("objective")) {
+        std::stringstream objective_ss;
+        objective_ss << std::string(j["objective"]);
+        Objective objective;
+        objective_ss >> objective;
+        set_objective(objective);
+    }
+
+    // Read bin types.
+    for (const auto& json_item: j["bin_types"]) {
+        Shape shape = read_shape(json_item);
+
+        Profit cost = shape.compute_area();
+        if (json_item.contains("cost"))
+            cost = json_item["cost"];
+
+        BinPos copies = 1;
+        if (json_item.contains("copies"))
+            copies = json_item["copies"];
+
+        BinPos copies_min = 0;
+        if (json_item.contains("copies_min"))
+            copies_min = json_item["copies_min"];
+
+        add_bin_type(shape, cost, copies, copies_min);
+    }
+
+    // Read item types.
+    for (const auto& json_item: j["item_types"]) {
+        std::vector<ItemShape> item_shapes;
+        if (json_item.contains("shapes")) {
+            // Multiple item shape.
+            for (auto it_shape = json_item["shapes"].begin();
+                 it_shape != json_item["shapes"].end();
+                 ++it_shape) {
+                auto json_shape = *it_shape;
+
+                ItemShape item_shape;
+                item_shape.shape = read_shape(json_shape);
+
+                // Read holes.
+                if (json_shape.contains("holes")) {
+                    for (auto it_hole = json_shape["holes"].begin();
+                         it_hole != json_shape["holes"].end();
+                         ++it_hole) {
+                        auto json_hole = *it_shape;
+                        Shape shape = read_shape(json_hole);
+                        item_shape.holes.push_back(shape);
+                    }
+                }
+
+                item_shapes.push_back(item_shape);
+            }
+
+        } else {
+            // Single item shape.
+            ItemShape item_shape;
+            item_shape.shape = read_shape(json_item);
+
+            // Read holes.
+            if (json_item.contains("holes")) {
+                for (auto it_hole = json_item["holes"].begin();
+                     it_hole != json_item["holes"].end();
+                     ++it_hole) {
+                    auto json_hole = *it_hole;
+                    Shape shape = read_shape(json_hole);
+                    item_shape.holes.push_back(shape);
+                }
+            }
+
+            item_shapes.push_back(item_shape);
+        }
+
+        Profit profit = -1;
+        if (json_item.contains("profit"))
+            profit = json_item["profit"];
+
+        ItemPos copies = 1;
+        if (json_item.contains("copies"))
+            copies = json_item["copies"];
+
+        std::vector<std::pair<Angle, Angle>> allowed_rotations = {{0, 0}};
+        add_item_type(
+                item_shapes,
+                profit,
+                copies,
+                allowed_rotations);
+    }
+
+}
+
+void InstanceBuilder::read(
         std::string instance_path)
 {
     std::ifstream file(instance_path);

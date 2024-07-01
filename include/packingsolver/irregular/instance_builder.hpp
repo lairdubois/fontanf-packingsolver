@@ -22,6 +22,9 @@ public:
      * Read from files
      */
 
+    /** Read item types from a stream. */
+    void read(std::istream& instance_stream);
+
     /** Read item types from a file. */
     void read(std::string instance_path);
 
