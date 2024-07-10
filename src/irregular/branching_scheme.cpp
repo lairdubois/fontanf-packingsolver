@@ -49,8 +49,9 @@ BranchingScheme::BranchingScheme(
             }
         }
         // 0: left; 1: bottom; 2: right; 3: top.
-        int start_border = 0;
-        LengthDbl start_coordinate = bin_type.shape.elements[element_0_pos].start.y;
+        const ShapeElement& element_0 = bin_type.shape.elements[element_0_pos];
+        int start_border = (element_0.start.y == bin_type.y_min)? 1: 0;
+        LengthDbl start_coordinate = element_0.start.y;
         for (ElementPos element_pos = 0;
                 element_pos < bin_type.shape.elements.size();
                 ++element_pos) {
@@ -366,7 +367,9 @@ BranchingScheme::Node BranchingScheme::child_tmp(
         const Insertion& insertion) const
 {
     //std::cout << std::endl;
-    //std::cout << "child_tmp " << insertion << std::endl;
+    //std::cout << "child_tmp"
+    //    << " parent " << pparent->id
+    //    << " insertion " << insertion << std::endl;
     const Node& parent = *pparent;
     Node node;
 
@@ -404,16 +407,19 @@ BranchingScheme::Node BranchingScheme::child_tmp(
 
     LengthDbl ys = insertion.y + shape_trapezoid.y_bottom();
     LengthDbl ye = insertion.y + shape_trapezoid.y_top();
-    LengthDbl xi = instance().x_max(bin_type, o);
-    LengthDbl yi = instance().y_max(bin_type, o);
     //std::cout << "ys " << ys << " ye " << ye << std::endl;
 
     // Update uncovered_trapezoids.
     ItemPos new_uncovered_trapezoid_pos = -1;
     if (insertion.new_bin > 0) {  // New bin.
-        if (ys > 0) {
-            UncoveredTrapezoid uncovered_trapezoid(
-                    GeneralizedTrapezoid(0, ys, 0, 0, 0, 0));
+        if (ys > bb_bin_type.y_min) {
+            UncoveredTrapezoid uncovered_trapezoid(GeneralizedTrapezoid(
+                        bb_bin_type.y_min,
+                        ys,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min));
             node.uncovered_trapezoids.push_back(uncovered_trapezoid);
         }
         {
@@ -428,9 +434,14 @@ BranchingScheme::Node BranchingScheme::child_tmp(
                     trapezoid);
             node.uncovered_trapezoids.push_back(uncovered_trapezoid);
         }
-        if (ye < yi) {
-            UncoveredTrapezoid uncovered_trapezoid(
-                    GeneralizedTrapezoid(ye, yi, 0, 0, 0, 0));
+        if (ye < bb_bin_type.y_max) {
+            UncoveredTrapezoid uncovered_trapezoid(GeneralizedTrapezoid(
+                        ye,
+                        bb_bin_type.y_max,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min,
+                        bb_bin_type.x_min));
             node.uncovered_trapezoids.push_back(uncovered_trapezoid);
         }
 
@@ -509,7 +520,7 @@ BranchingScheme::Node BranchingScheme::child_tmp(
             }
         }
         //std::cout << "uncovered_trapezoids:" << std::endl;
-        //for (const UncoveredTrapezoid& uncovered_trapezoid: parent.uncovered_trapezoids)
+        //for (const UncoveredTrapezoid& uncovered_trapezoid: node.uncovered_trapezoids)
         //    std::cout << "* " << uncovered_trapezoid << std::endl;
 
         // Update extra rectangles.
@@ -612,11 +623,11 @@ BranchingScheme::Node BranchingScheme::child_tmp(
         std::max(parent.xs_max, insertion.x):
         insertion.x;
     node.current_area = instance_.previous_bin_area(bin_pos);
-    node.guide_area = instance_.previous_bin_area(bin_pos) + node.xs_max * yi;
+    node.guide_area = instance_.previous_bin_area(bin_pos) + node.xs_max * (bb_bin_type.y_max - bb_bin_type.y_min);
     for (auto it = node.uncovered_trapezoids.rbegin(); it != node.uncovered_trapezoids.rend(); ++it) {
         const GeneralizedTrapezoid& trapezoid = it->trapezoid;
-        node.current_area += trapezoid.area(0.0);
         //std::cout << trapezoid << std::endl;
+        node.current_area += trapezoid.area(bb_bin_type.x_min);
         //std::cout << "* " << trapezoid.area() << " " << trapezoid.area(0.0) << std::endl;
         //std::cout << "current_area: " << node.current_area << std::endl;
         if (node.xe_max < trapezoid.x_max())
@@ -637,13 +648,14 @@ BranchingScheme::Node BranchingScheme::child_tmp(
     }
 
     if (node.number_of_items == instance().number_of_items()) {
-        node.current_area = instance().previous_bin_area(bin_pos) + node.xe_max * yi;
+        node.current_area = (instance().previous_bin_area(bin_pos) + node.xe_max - bb_bin_type.x_min)
+            * (bb_bin_type.y_max - bb_bin_type.y_min);
     }
 
     node.waste = node.current_area - node.item_area;
 
     {
-        AreaDbl waste = instance().previous_bin_area(bin_pos) + node.xe_max * yi - instance().item_area();
+        AreaDbl waste = instance().previous_bin_area(bin_pos) + node.xe_max * (bb_bin_type.y_max - bb_bin_type.y_min) - instance().item_area();
         if (node.waste < waste)
             node.waste = waste;
     }
@@ -686,9 +698,7 @@ std::vector<std::shared_ptr<BranchingScheme::Node>> BranchingScheme::children(
     for (Counter i = 0; i < (Counter)insertions_.size(); ++i) {
         cs[i] = std::make_shared<Node>(child_tmp(parent, insertions_[i]));
         //std::cout << cs[i]->id
-        //    << " rid " << cs[i]->trapezoid_set_id
-        //    << " x " << cs[i]->x
-        //    << " y " << cs[i]->y
+        //    << " insertion " << insertions_[i]
         //    << std::endl;
     }
     return cs;
@@ -818,7 +828,7 @@ const std::vector<BranchingScheme::Insertion>& BranchingScheme::insertions(
                             new_bin,
                             0,  // uncovered_trapezoid_pos
                             -1);  // extra_trapezoid_pos
-                                  //
+
                     // Extra rectangles.
                     for (ItemPos extra_trapezoid_pos = 0;
                             extra_trapezoid_pos < (ItemPos)bb_bin_type.defects.size();
@@ -836,10 +846,6 @@ const std::vector<BranchingScheme::Insertion>& BranchingScheme::insertions(
             }
         }
     }
-
-    //std::cout << "insertions:" << std::endl;
-    //for (const Insertion& insertion: insertions_)
-    //    std::cout << insertion << std::endl;
 
     return insertions_;
 }
@@ -860,6 +866,7 @@ void BranchingScheme::insertion_trapezoid_set(
     //    << " utp " << uncovered_trapezoid_pos
     //    << " etp " << extra_trapezoid_pos
     //    << std::endl;
+
     BinTypeId bin_type_id = (new_bin == 0)?
         instance().bin_type_id(parent->number_of_bins - 1):
         instance().bin_type_id(parent->number_of_bins);
@@ -901,7 +908,7 @@ void BranchingScheme::insertion_trapezoid_set(
     } else if (extra_trapezoid_pos != -1) {
         ys = extra_trapezoids[extra_trapezoid_pos].trapezoid.y_top();
     } else {  // new bin.
-        ys = 0;
+        ys = bb_bin_type.y_min;
     }
     ys -= item_shape_trapezoid.y_bottom();
     LengthDbl ye = ys + trapezoid_set.y_max;
@@ -934,6 +941,20 @@ void BranchingScheme::insertion_trapezoid_set(
                 - item_shape_trapezoid.x_max());
     }
     //std::cout << "ys " << ys << " xs " << xs << std::endl;
+
+    if (uncovered_trapezoid_pos > 0) {
+        if (!striclty_lesser(
+                    xs + item_shape_trapezoid.x_min(),
+                    parent->uncovered_trapezoids[uncovered_trapezoid_pos - 1].trapezoid.x_max())) {
+            return;
+        }
+    } else if (extra_trapezoid_pos != -1) {
+        if (!striclty_lesser(
+                    xs + item_shape_trapezoid.x_min(),
+                    extra_trapezoids[extra_trapezoid_pos].trapezoid.x_max())) {
+            return;
+        }
+    }
 
     if (new_bin == 0) {
 
@@ -1048,8 +1069,7 @@ void BranchingScheme::insertion_trapezoid_set(
     insertion.y = ys;
     insertion.new_bin = new_bin;
     insertions_.push_back(insertion);
-    //std::cout << "xs " << xs << std::endl;
-    //std::cout << "ok" << std::endl;
+    //std::cout << "y " << insertion.y << " x " << insertion.x << " -> ok" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1224,7 +1244,7 @@ std::ostream& packingsolver::irregular::operator<<(
         const BranchingScheme::UncoveredTrapezoid& uncovered_trapezoid)
 {
     os << "item_type_id " << uncovered_trapezoid.item_type_id
-        << " defect_it " << uncovered_trapezoid.defect_id
+        << " defect_id " << uncovered_trapezoid.defect_id
         << " yb " << uncovered_trapezoid.trapezoid.y_bottom()
         << " yt " << uncovered_trapezoid.trapezoid.y_top()
         << " xbl " << uncovered_trapezoid.trapezoid.x_bottom_left()
