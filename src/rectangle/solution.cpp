@@ -62,6 +62,7 @@ void Solution::add_item(
 
     SolutionBin& bin = bins_[bin_pos];
 
+    const BinType& bin_type = instance().bin_type(bin.bin_type_id);
     const ItemType& item_type = instance().item_type(item_type_id);
 
     if (rotate && item_type.oriented) {
@@ -78,7 +79,6 @@ void Solution::add_item(
     bin.items.push_back(item);
 
     Direction o = Direction::X;
-    const BinType& bin_type = instance().bin_type(bin.bin_type_id);
     Length xe = bl_corner.x + instance().x(item_type, rotate, o);
     Length ye = bl_corner.y + instance().y(item_type, rotate, o);
 
@@ -108,11 +108,8 @@ void Solution::add_item(
             x_max_ = xe;
         if (y_max_ < ye)
             y_max_ = ye;
-        Length xi = instance().bin_type(bin.bin_type_id).rect.x;
-        Length yi = instance().bin_type(bin.bin_type_id).rect.y;
-        area_ = (std::min)(
-                bin_area_ - (xi - x_max_) * yi,
-                bin_area_ - (yi - y_max_) * xi);
+        area_ = bin_area_ - bin_type.area() + (x_max_ * y_max_);
+        leftover_value_ = bin_area_ - area_;
     }
 }
 
@@ -143,6 +140,68 @@ void Solution::append(
     for (BinPos i_pos = 0; i_pos < (BinPos)solution.bins_.size(); ++i_pos) {
         const SolutionBin& bin = solution.bins_[i_pos];
         append(solution, i_pos, bin.copies, bin_type_ids, item_type_ids);
+    }
+}
+
+Solution::Solution(
+        const Instance& instance,
+        const std::string& certificate_path):
+    Solution(instance)
+{
+    std::ifstream file(certificate_path);
+    if (!file.good()) {
+        throw std::runtime_error(
+                "Unable to open file \"" + certificate_path + "\".");
+    }
+
+    std::string tmp;
+    std::vector<std::string> line;
+    std::vector<std::string> labels;
+
+    getline(file, tmp);
+    labels = optimizationtools::split(tmp, ',');
+    while (getline(file, tmp)) {
+        line = optimizationtools::split(tmp, ',');
+
+        std::string type = "";
+        ItemTypeId id = -1;
+        BinPos copies = -1;
+        BinPos bin_pos = -1;
+        Length x = -1;
+        Length y = -1;
+        Length lx = -1;
+        Length ly = -1;
+
+        for (Counter i = 0; i < (Counter)line.size(); ++i) {
+            if (labels[i] == "TYPE") {
+                type = line[i];
+            } else if (labels[i] == "ID") {
+                id = (ItemTypeId)std::stol(line[i]);
+            } else if (labels[i] == "COPIES") {
+                copies = (Length)std::stol(line[i]);
+            } else if (labels[i] == "BIN") {
+                bin_pos = (BinPos)std::stol(line[i]);
+            } else if (labels[i] == "X") {
+                x = (Length)std::stol(line[i]);
+            } else if (labels[i] == "Y") {
+                y = (Length)std::stol(line[i]);
+            } else if (labels[i] == "LX") {
+                lx = (Length)std::stol(line[i]);
+            } else if (labels[i] == "LY") {
+                ly = (Length)std::stol(line[i]);
+            }
+        }
+
+        if (type == "BIN") {
+            add_bin(id, copies);
+        } else if (type == "ITEM") {
+            const ItemType& item_type = instance.item_type(id);
+            add_item(
+                    bin_pos,
+                    id,
+                    {x, y},
+                    (lx != item_type.rect.x));
+        }
     }
 }
 
@@ -182,7 +241,9 @@ bool Solution::operator<(const Solution& solution) const
             return false;
         if (!full())
             return true;
-        return solution.waste() < waste();
+        if (solution.number_of_bins() != number_of_bins())
+            return solution.number_of_bins() < number_of_bins();
+        return solution.leftover_value() > leftover_value();
     } case Objective::OpenDimensionX: {
         if (!solution.full())
             return false;
@@ -292,6 +353,7 @@ nlohmann::json Solution::to_json() const
         {"WeightLoad", weight_load()},
         {"XMax", x_max()},
         {"YMax", y_max()},
+        {"LeftoverValue", leftover_value()},
     };
 }
 
@@ -317,6 +379,7 @@ void Solution::format(
             << "Weight load:      " << weight_load() << std::endl
             << "X max:            " << x_max() << std::endl
             << "Y max:            " << y_max() << std::endl
+            << "Leftover value:   " << leftover_value() << std::endl
             ;
     }
 

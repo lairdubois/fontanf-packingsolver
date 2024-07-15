@@ -632,6 +632,9 @@ BranchingScheme::Node BranchingScheme::child_tmp(
         //std::cout << "current_area: " << node.current_area << std::endl;
         if (node.xe_max < trapezoid.x_max())
             node.xe_max = trapezoid.x_max();
+        if (trapezoid.x_max() != bb_bin_type.x_min
+                && node.ye_max < trapezoid.y_top())
+            node.ye_max = trapezoid.y_top();
         if (trapezoid.x_max() > node.xs_max)
             node.guide_area += trapezoid.area(node.xs_max);
     }
@@ -641,8 +644,12 @@ BranchingScheme::Node BranchingScheme::child_tmp(
         node.current_area += trapezoid.area();
         //std::cout << trapezoid << std::endl;
         //std::cout << "current_area " << node.current_area << std::endl;
-        if (node.xe_max < trapezoid.x_max())
-            node.xe_max = trapezoid.x_max();
+        if (extra_trapezoid.item_type_id != -1) {
+            if (node.xe_max < trapezoid.x_max())
+                node.xe_max = trapezoid.x_max();
+            if (node.ye_max < trapezoid.y_top())
+                node.ye_max = trapezoid.y_top();
+        }
         if (trapezoid.x_max() > node.xs_max)
             node.guide_area += trapezoid.area(node.xs_max);
     }
@@ -685,6 +692,9 @@ BranchingScheme::Node BranchingScheme::child_tmp(
     }
     if (node.waste < 0.0)
         node.waste = 0.0;
+
+    node.leftover_value = (bb_bin_type.x_max - bb_bin_type.x_min) * (bb_bin_type.y_max - bb_bin_type.y_min)
+        - (node.xe_max - bb_bin_type.x_min) * (node.ye_max - bb_bin_type.y_min);
 
     node.id = node_id_++;
     return node;
@@ -1107,7 +1117,9 @@ bool BranchingScheme::better(
             return false;
         if (!leaf(node_2))
             return true;
-        return node_2->waste > node_1->waste;
+        if (node_2->number_of_bins != node_1->number_of_bins)
+            return node_2->number_of_bins > node_1->number_of_bins;
+        return node_2->leftover_value < node_1->leftover_value;
     } case Objective::OpenDimensionX: {
         if (!leaf(node_1))
             return false;
@@ -1163,7 +1175,13 @@ bool BranchingScheme::bound(
     } case Objective::BinPackingWithLeftovers: {
         if (!leaf(node_2))
             return false;
-        return node_1->waste >= node_2->waste;
+        if (node_1->number_of_bins > node_2->number_of_bins) {
+            return true;
+        } else if (node_1->number_of_bins < node_2->number_of_bins) {
+            return false;
+        } else {
+            return (node_1->leftover_value <= node_2->leftover_value);
+        }
     } case Objective::Knapsack: {
         if (leaf(node_2))
             return true;
@@ -1233,6 +1251,27 @@ Solution BranchingScheme::to_solution(
                 bl_corner,
                 trapezoid_set.angle);
     }
+
+    if (node->last_bin_direction == Direction::X) {
+        if (!equal(node->xe_max, solution.x_max())) {
+            throw std::runtime_error(
+                    "irregular::BranchingScheme::to_solution.");
+        }
+        if (!equal(node->ye_max, solution.y_max())) {
+            throw std::runtime_error(
+                    "irregular::BranchingScheme::to_solution.");
+        }
+    }
+    if (node->last_bin_direction == Direction::Y) {
+        if (!equal(node->ye_max, solution.x_max())) {
+            throw std::runtime_error(
+                    "irregular::BranchingScheme::to_solution.");
+        }
+        if (!equal(node->xe_max, solution.y_max())) {
+            throw std::runtime_error(
+                    "irregular::BranchingScheme::to_solution.");
+        }
+    }
     return solution;
 }
 
@@ -1289,7 +1328,7 @@ std::ostream& packingsolver::irregular::operator<<(
     os << "trapezoid_set_id " << insertion.trapezoid_set_id
         << " item_shape_pos " << insertion.item_shape_pos
         << " item_shape_trapezoid_pos " << insertion.item_shape_trapezoid_pos
-        << " new_bin " << insertion.new_bin
+        << " new_bin " << (int)insertion.new_bin
         << " x " << insertion.x
         << " y " << insertion.y
         ;

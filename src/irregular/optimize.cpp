@@ -49,7 +49,7 @@ void optimize_tree_search(
         growth_factors = {1.5};
 
     std::vector<BranchingScheme> branching_schemes;
-    std::vector<treesearchsolver::IterativeBeamSearch2Parameters<BranchingScheme>> ibs_parameterss;
+    std::vector<treesearchsolver::IterativeBeamSearch2Parameters<BranchingScheme>> ibs_parameters_list;
     std::vector<irregular::Output> outputs;
     for (double growth_factor: growth_factors) {
         for (GuideId guide_id: guides) {
@@ -69,16 +69,17 @@ void optimize_tree_search(
                     ibs_parameters.maximum_size_of_the_queue
                         = parameters.not_anytime_tree_search_queue_size;
                 }
-                ibs_parameterss.push_back(ibs_parameters);
+                ibs_parameters_list.push_back(ibs_parameters);
                 outputs.push_back(irregular::Output(instance));
             }
         }
     }
 
     std::vector<std::thread> threads;
+    std::forward_list<std::exception_ptr> exception_ptr_list;
     for (Counter i = 0; i < (Counter)branching_schemes.size(); ++i) {
         if (parameters.optimization_mode == OptimizationMode::Anytime) {
-            ibs_parameterss[i].new_solution_callback
+            ibs_parameters_list[i].new_solution_callback
                 = [&algorithm_formatter, &branching_schemes, i](
                         const treesearchsolver::Output<BranchingScheme>& tss_output)
                 {
@@ -93,7 +94,7 @@ void optimize_tree_search(
                     algorithm_formatter.update_solution(solution, ss.str());
                 };
         } else {
-            ibs_parameterss[i].new_solution_callback
+            ibs_parameters_list[i].new_solution_callback
                 = [&outputs, &branching_schemes, i](
                         const treesearchsolver::Output<BranchingScheme>& tss_output)
                 {
@@ -105,18 +106,23 @@ void optimize_tree_search(
                 };
         }
         if (parameters.optimization_mode != OptimizationMode::NotAnytimeSequential) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        treesearchsolver::iterative_beam_search_2<BranchingScheme>,
+                        wrapper<decltype(&treesearchsolver::iterative_beam_search_2<BranchingScheme>), treesearchsolver::iterative_beam_search_2<BranchingScheme>>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(branching_schemes[i]),
-                        ibs_parameterss[i]));
+                        ibs_parameters_list[i]));
         } else {
             treesearchsolver::iterative_beam_search_2<BranchingScheme>(
                     branching_schemes[i],
-                    ibs_parameterss[i]);
+                    ibs_parameters_list[i]);
         }
     }
     for (Counter i = 0; i < (Counter)threads.size(); ++i)
         threads[i].join();
+    for (const std::exception_ptr& exception_ptr: exception_ptr_list)
+        if (exception_ptr)
+            std::rethrow_exception(exception_ptr);
     if (parameters.optimization_mode != OptimizationMode::Anytime) {
         for (Counter i = 0; i < (Counter)branching_schemes.size(); ++i) {
             std::stringstream ss;
@@ -445,44 +451,63 @@ const packingsolver::irregular::Output packingsolver::irregular::optimize(
 
     // Run selected algorithms.
     if (parameters.optimization_mode != OptimizationMode::NotAnytimeSequential) {
+        std::forward_list<std::exception_ptr> exception_ptr_list;
         std::vector<std::thread> threads;
         // Tree search.
-        if (use_tree_search)
+        if (use_tree_search) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        optimize_tree_search,
+                        wrapper<decltype(&optimize_tree_search), optimize_tree_search>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(instance),
                         std::ref(parameters),
                         std::ref(algorithm_formatter)));
+        }
         // Sequential single knapsack.
-        if (use_sequential_single_knapsack)
+        if (use_sequential_single_knapsack) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        optimize_sequential_single_knapsack,
+                        wrapper<decltype(&optimize_sequential_single_knapsack), optimize_sequential_single_knapsack>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(instance),
                         std::ref(parameters),
                         std::ref(algorithm_formatter)));
+        }
         // Sequential value correction.
-        if (use_sequential_value_correction)
+        if (use_sequential_value_correction) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        optimize_sequential_value_correction,
+                        wrapper<decltype(&optimize_sequential_value_correction), optimize_sequential_value_correction>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(instance),
                         std::ref(parameters),
                         std::ref(algorithm_formatter)));
+        }
         // Dichotomic search.
-        if (use_dichotomic_search)
+        if (use_dichotomic_search) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        optimize_dichotomic_search,
+                        wrapper<decltype(&optimize_dichotomic_search), optimize_dichotomic_search>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(instance),
                         std::ref(parameters),
                         std::ref(algorithm_formatter)));
+        }
         // Column generation.
-        if (use_column_generation)
+        if (use_column_generation) {
+            exception_ptr_list.push_front(std::exception_ptr());
             threads.push_back(std::thread(
-                        optimize_column_generation,
+                        wrapper<decltype(&optimize_column_generation), optimize_column_generation>,
+                        std::ref(exception_ptr_list.front()),
                         std::ref(instance),
                         std::ref(parameters),
                         std::ref(algorithm_formatter)));
+        }
         for (Counter i = 0; i < (Counter)threads.size(); ++i)
             threads[i].join();
+        for (std::exception_ptr exception_ptr: exception_ptr_list)
+            if (exception_ptr)
+                std::rethrow_exception(exception_ptr);
     } else {
         // Tree search.
         if (use_tree_search)
@@ -514,6 +539,70 @@ const packingsolver::irregular::Output packingsolver::irregular::optimize(
                     instance,
                     parameters,
                     algorithm_formatter);
+    }
+
+    if (instance.objective() == Objective::BinPackingWithLeftovers
+            && parameters.optimization_mode != OptimizationMode::Anytime
+            && parameters.tree_search_guides != std::vector<GuideId>({2, 3})) {
+        const Solution& solution_best = output.solution_pool.best();
+
+        InstanceBuilder last_bin_instance_builder;
+        last_bin_instance_builder.set_objective(Objective::BinPackingWithLeftovers);
+        last_bin_instance_builder.set_parameters(instance.parameters());
+
+        // Add bin types.
+        const SolutionBin& last_bin = solution_best.bin(solution_best.number_of_bins() - 1);
+        last_bin_instance_builder.add_bin_type(instance.bin_type(last_bin.bin_type_id), 1);
+
+        // Add item types.
+        std::vector<ItemPos> last_bin_item_copies(instance.number_of_item_types(), 0);
+        for (const SolutionItem& solution_item: last_bin.items)
+            last_bin_item_copies[solution_item.item_type_id]++;
+
+        std::vector<ItemTypeId> last_bin_to_orig;
+        for (ItemTypeId item_type_id = 0;
+                item_type_id < instance.number_of_item_types();
+                ++item_type_id) {
+            const ItemType& item_type = instance.item_type(item_type_id);
+            if (last_bin_item_copies[item_type_id] > 0) {
+                last_bin_instance_builder.add_item_type(
+                        item_type,
+                        item_type.profit,
+                        last_bin_item_copies[item_type_id]);
+                last_bin_to_orig.push_back(item_type_id);
+            }
+        }
+
+        // Build instance.
+        Instance last_bin_instance = last_bin_instance_builder.build();
+
+        // Solve instance.
+        OptimizeParameters last_bin_parameters = parameters;
+        last_bin_parameters.verbosity_level = 0;
+        last_bin_parameters.tree_search_guides = {2, 3};
+        auto last_bin_output = optimize(last_bin_instance, last_bin_parameters);
+
+        // Retrieve solution.
+        Solution solution(instance);
+        // Add first bins from current best solution.
+        for (BinPos bin_pos = 0;
+                bin_pos < solution_best.number_of_different_bins() - 2;
+                ++bin_pos) {
+            const SolutionBin& solution_bin = solution_best.bin(bin_pos);
+            solution.append(solution_best, bin_pos, solution_bin.copies);
+        }
+        // Add last optimized bin.
+        solution.append(
+                last_bin_output.solution_pool.best(),
+                0,
+                1,
+                {last_bin.bin_type_id},
+                last_bin_to_orig);
+
+        // Update best solution.
+        std::stringstream ss;
+        ss << "post-process";
+        algorithm_formatter.update_solution(solution, ss.str());
     }
 
     algorithm_formatter.end();
