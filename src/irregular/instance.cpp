@@ -60,8 +60,8 @@ Point Point::rotate(
         Angle angle) const
 {
     Point point_out;
-    point_out.x = std::cos(angle) * x - std::sin(angle) * y;
-    point_out.y = std::sin(angle) * x + std::cos(angle) * y;
+    point_out.x = std::round((std::cos(angle) * x - std::sin(angle) * y) * 1e8) / 1e8;
+    point_out.y = std::round((std::sin(angle) * x + std::cos(angle) * y) * 1e8) / 1e8;
     return point_out;
 }
 
