@@ -427,7 +427,7 @@ std::ostream& Instance::format(
             << std::setw(12) << "YE"
             << std::setw(12) << "XC"
             << std::setw(12) << "YC"
-            << std::setw(10) << "ACW"
+            << std::setw(2) << "O"
             << std::endl
             << std::setw(7) << "------"
             << std::setw(5) << "----"
@@ -439,7 +439,7 @@ std::ostream& Instance::format(
             << std::setw(12) << "--"
             << std::setw(12) << "--"
             << std::setw(12) << "--"
-            << std::setw(10) << "---"
+            << std::setw(2) << "-"
             << std::endl;
         // Bins.
         for (BinTypeId bin_type_id = 0;
@@ -463,7 +463,7 @@ std::ostream& Instance::format(
                     << std::setw(12) << element.end.y
                     << std::setw(12) << element.center.x
                     << std::setw(12) << element.center.y
-                    << std::setw(10) << element.anticlockwise
+                    << std::setw(2) << shape::orientation2char(element.orientation)
                     << std::endl;
             }
             // Defects.
@@ -486,7 +486,7 @@ std::ostream& Instance::format(
                         << std::setw(12) << element.end.y
                         << std::setw(12) << element.center.x
                         << std::setw(12) << element.center.y
-                        << std::setw(10) << element.anticlockwise
+                        << std::setw(2) << shape::orientation2char(element.orientation)
                         << std::endl;
                 }
                 for (Counter hole_pos = 0;
@@ -510,7 +510,7 @@ std::ostream& Instance::format(
                             << std::setw(12) << element.end.y
                             << std::setw(12) << element.center.x
                             << std::setw(12) << element.center.y
-                            << std::setw(10) << element.anticlockwise
+                            << std::setw(2) << shape::orientation2char(element.orientation)
                             << std::endl;
                     }
                 }
@@ -542,7 +542,7 @@ std::ostream& Instance::format(
                         << std::setw(12) << element.end.y
                         << std::setw(12) << element.center.x
                         << std::setw(12) << element.center.y
-                        << std::setw(10) << element.anticlockwise
+                        << std::setw(2) << shape::orientation2char(element.orientation)
                         << std::endl;
                 }
                 for (Counter hole_pos = 0;
@@ -566,7 +566,7 @@ std::ostream& Instance::format(
                             << std::setw(12) << element.end.y
                             << std::setw(12) << element.center.x
                             << std::setw(12) << element.center.y
-                            << std::setw(10) << element.anticlockwise
+                            << std::setw(2) << shape::orientation2char(element.orientation)
                             << std::endl;
                     }
                 }
