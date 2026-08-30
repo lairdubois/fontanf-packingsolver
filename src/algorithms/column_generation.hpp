@@ -783,7 +783,7 @@ std::vector<std::shared_ptr<const Cut>> ColumnGenerationPricingSolver<Instance, 
     // A cut per separation round is plenty to make progress without
     // overwhelming the master LP; a co-packing candidate triple that is
     // still violated next round will simply be found again.
-    const CutIdx maximum_number_of_cuts = 1;
+    const CutIdx maximum_number_of_cuts = 10000;
     // Safety cap on the total number of candidate triples considered, in
     // case some column happens to cover an unusually large number of item
     // types.
@@ -806,11 +806,65 @@ std::vector<std::shared_ptr<const Cut>> ColumnGenerationPricingSolver<Instance, 
     // of copy count - can cut off the true optimum. Excluding item types
     // with copies > 1 from candidate triples entirely keeps every
     // generated cut within the regime the derivation actually covers.
+    //
+    // Two item types are also never included, both decided by a first pass
+    // over 'solution.columns()' before any 'ColumnItems' entry is built:
+    //
+    // - an item type present in fewer than 2 non-negligible columns. Split
+    //   a candidate triple's violation into: 'A', the mass of columns
+    //   containing both of the other two item types (independent of this
+    //   one), and 'B', the mass of columns containing this item type and
+    //   exactly one of the other two. An item type present in only one
+    //   column can contribute at most that column's value to 'B', so it can
+    //   never beat a third item type reachable via a richer pair as the
+    //   "extra" beyond 'A' - and using it as a seed pair member instead is
+    //   only ever needed when its one column has exactly two items (the
+    //   only way to reach that specific pair), a low-value case not worth
+    //   special-casing.
+    //
+    // - an item type whose every non-negligible appearance has value ~= 1
+    //   (an "integral" column: with the item's own copies == 1, this
+    //   saturates that item's entire row capacity, leaving no room for any
+    //   other column to also cover it). This applies to every cardinality k
+    //   this function generates cuts for (3, 5 and 7): a set of such
+    //   integral columns is necessarily pairwise item-disjoint (two
+    //   sharing an item would both need that item's full capacity at once),
+    //   so their contributions floor(count_1/2), floor(count_2/2), ...
+    //   sum to at most floor(k/2) (by floor(a/2)+floor(b/2) <=
+    //   floor((a+b)/2), summed count_i <= k) - exactly the cut's own
+    //   right-hand side. Reaching a violation (> floor(k/2)) therefore
+    //   always requires at least one genuinely fractional contribution, so
+    //   an item type with no fractional appearance can never be part of a
+    //   violated cut.
     struct ColumnItems
     {
         Value value;
         std::vector<ItemTypeId> item_type_ids;
     };
+    struct ItemTypeStats
+    {
+        int number_of_columns = 0;
+        bool has_fractional_column = false;
+    };
+    std::unordered_map<ItemTypeId, ItemTypeStats> item_type_stats;
+    for (const auto& p: solution.columns()) {
+        if (p.second < 1e-6)
+            continue;
+        bool fractional = p.second < 1.0 - 1e-6;
+        for (const columngenerationsolver::LinearTerm& element: p.first->elements) {
+            if (element.row < instance_.number_of_bin_types())
+                continue;
+            if (element.coefficient <= 0.5)
+                continue;
+            ItemTypeId item_type_id = element.row - instance_.number_of_bin_types();
+            if (instance_.item_type(item_type_id).copies != 1)
+                continue;
+            ItemTypeStats& stats = item_type_stats[item_type_id];
+            stats.number_of_columns++;
+            if (fractional)
+                stats.has_fractional_column = true;
+        }
+    }
     std::vector<ColumnItems> column_items;
     for (const auto& p: solution.columns()) {
         if (p.second < 1e-6)
@@ -825,40 +879,13 @@ std::vector<std::shared_ptr<const Cut>> ColumnGenerationPricingSolver<Instance, 
             ItemTypeId item_type_id = element.row - instance_.number_of_bin_types();
             if (instance_.item_type(item_type_id).copies != 1)
                 continue;
+            const ItemTypeStats& stats = item_type_stats.at(item_type_id);
+            if (stats.number_of_columns < 2 || !stats.has_fractional_column)
+                continue;
             entry.item_type_ids.push_back(item_type_id);
         }
         std::sort(entry.item_type_ids.begin(), entry.item_type_ids.end());
         column_items.push_back(std::move(entry));
-    }
-
-    // Drop item types present in fewer than 2 (non-negligible) columns.
-    // Split a candidate triple's violation into: 'A', the mass of columns
-    // containing both of the other two item types (independent of this
-    // one), and 'B', the mass of columns containing this item type and
-    // exactly one of the other two. An item type present in only one
-    // column can contribute at most that column's value to 'B', so it can
-    // never beat a third item type reachable via a richer pair as the
-    // "extra" beyond 'A' - and using it as a seed pair member instead is
-    // only ever needed when its one column has exactly two items (the only
-    // way to reach that specific pair), a low-value case not worth
-    // special-casing.
-    {
-        std::vector<int> number_of_columns(instance_.number_of_item_types(), 0);
-        for (const ColumnItems& entry: column_items) {
-            for (ItemTypeId item_type_id: entry.item_type_ids)
-                number_of_columns[item_type_id]++;
-        }
-        for (ColumnItems& entry: column_items) {
-            entry.item_type_ids.erase(
-                    std::remove_if(
-                            entry.item_type_ids.begin(),
-                            entry.item_type_ids.end(),
-                            [&number_of_columns](ItemTypeId item_type_id)
-                            {
-                                return number_of_columns[item_type_id] < 2;
-                            }),
-                    entry.item_type_ids.end());
-        }
     }
 
     // Build, in a single pass:
@@ -1206,7 +1233,8 @@ Value ColumnGenerationPricingSolver<Instance, InstanceBuilder, Solution, Output>
         if (extra_solution.item_copies(item_type_id) > 0)
             number_of_items_present++;
     }
-    return (Value)(number_of_items_present / 2);
+    int coefficient = number_of_items_present / 2;
+    return (Value)coefficient;
 }
 
 template <typename Instance, typename InstanceBuilder, typename Solution, typename Output>
