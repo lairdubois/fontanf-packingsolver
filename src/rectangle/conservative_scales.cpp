@@ -97,12 +97,16 @@ std::vector<double> solve_conservative_scale_lp(
         if (cutting_plane_iteration >= 10000)
             break;
 
+        // Declared outside the '#ifdef' because everything below the
+        // '#endif' reads it, and that code is compiled whether or not HiGHS
+        // is available.
+        std::vector<double> solution;
 #ifdef HIGHS_FOUND
         Highs highs;
         mathoptsolverscmake::reduce_printout(highs);
         mathoptsolverscmake::load(highs, model);
         mathoptsolverscmake::solve(highs);
-        std::vector<double> solution = mathoptsolverscmake::get_solution(highs);
+        solution = mathoptsolverscmake::get_solution(highs);
 #else
         throw std::invalid_argument(FUNC_SIGNATURE);
 #endif
